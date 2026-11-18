@@ -201,6 +201,7 @@ final class Command
         $job = $this->s->jobs->find((int) $args[0]);
         if ($job === null) {
             WP_CLI::error('No such job.');
+            return;
         }
         foreach ($job->summary() as $k => $v) {
             WP_CLI::line(sprintf('%-20s %s', $k, is_array($v) ? implode(' | ', array_map('strval', $v)) : (string) $v));

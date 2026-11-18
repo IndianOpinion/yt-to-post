@@ -229,7 +229,7 @@ final class Chunker
         }
         if (preg_match_all('/[.!?\x{0964}\x{3002}\x{FF01}\x{FF1F}]["\')\]]*\s/u', $max, $m, PREG_OFFSET_CAPTURE) > 0) {
             $last = end($m[0]);
-            $cut = $last[1] + strlen($last[0]);
+            $cut = $last === false ? 0 : $last[1] + strlen($last[0]);
             if ($cut > strlen($max) / 3) {
                 return substr($max, 0, $cut);
             }

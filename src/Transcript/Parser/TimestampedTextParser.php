@@ -49,7 +49,8 @@ final class TimestampedTextParser implements TranscriptParser
                 continue;
             }
             if ($items !== []) {
-                $items[count($items) - 1][1] .= "\n" . trim($line);
+                $k = array_key_last($items);
+                $items[$k] = [$items[$k][0], $items[$k][1] . "\n" . trim($line)];
             }
         }
         $cues = [];

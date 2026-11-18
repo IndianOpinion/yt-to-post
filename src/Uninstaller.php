@@ -65,7 +65,10 @@ final class Uninstaller
         if ($wpdb instanceof \wpdb) {
             $like = $wpdb->esc_like('_transient_yt_to_post_') . '%';
             $likeTimeout = $wpdb->esc_like('_transient_timeout_yt_to_post_') . '%';
-            $wpdb->query($wpdb->prepare("DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s", $like, $likeTimeout));
+            $sql = $wpdb->prepare("DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s", $like, $likeTimeout);
+            if (is_string($sql)) {
+                $wpdb->query($sql);
+            }
             $table = SchemaInstaller::table($wpdb);
             $wpdb->query("DROP TABLE IF EXISTS `$table`");
         }

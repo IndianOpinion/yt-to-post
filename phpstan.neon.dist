@@ -1,5 +1,5 @@
 parameters:
-    level: 6
+    level: 8
     paths:
         - src
         - yt-to-post.php
@@ -17,3 +17,7 @@ parameters:
     ignoreErrors:
         -
             identifier: requireOnce.fileNotFound
+        -
+            # The table name comes from $wpdb->prefix; every value goes through a placeholder.
+            message: '#^Parameter \#1 \$query of method wpdb::prepare\(\) expects literal-string#'
+            identifier: argument.type
