@@ -1,0 +1,36 @@
+<?php
+
+declare(strict_types=1);
+
+namespace IndianOpinion\YtToPost\YouTube;
+
+/**
+ * The access token cache: an encrypted transient that expires 60 seconds
+ * early.
+ */
+final class AccessTokens
+{
+    public const TRANSIENT = 'yt_to_post_access_token';
+
+    public function __construct(private readonly OAuthClient $oauth)
+    {
+    }
+
+    public function get(): ?string
+    {
+        if (!Connection::isConnected()) {
+            return null;
+        }
+        $t = $this->oauth->cachedAccessToken();
+        if ($t !== null) {
+            return $t;
+        }
+        return $this->oauth->refresh()['token'];
+    }
+
+    public function forceRefresh(): string
+    {
+        delete_transient(self::TRANSIENT);
+        return $this->oauth->refresh()['token'];
+    }
+}

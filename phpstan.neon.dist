@@ -1,0 +1,23 @@
+parameters:
+    level: 8
+    paths:
+        - src
+        - yt-to-post.php
+        - uninstall.php
+        - autoload.php
+    bootstrapFiles:
+        - vendor/php-stubs/wordpress-stubs/wordpress-stubs.php
+        - vendor/php-stubs/wp-cli-stubs/wp-cli-stubs.php
+        - tests/phpstan-constants.php
+    dynamicConstantNames:
+        - WP_DEBUG_LOG
+        - WP_CLI
+        - YT_TO_POST_TESTING
+    treatPhpDocTypesAsCertain: false
+    ignoreErrors:
+        -
+            identifier: requireOnce.fileNotFound
+        -
+            # The table name comes from $wpdb->prefix; every value goes through a placeholder.
+            message: '#^Parameter \#1 \$query of method wpdb::prepare\(\) expects literal-string#'
+            identifier: argument.type
