@@ -24,6 +24,7 @@ final class YouTubeClient
 {
     public const API = 'https://www.googleapis.com/youtube/v3/';
     public const OEMBED = 'https://www.youtube.com/oembed';
+    public const OEMBED_MAX_BYTES = 65536;
 
     /** @var int quota units spent by this instance, for the job record */
     private int $spent = 0;
@@ -161,6 +162,10 @@ final class YouTubeClient
      */
     public function oEmbed(string $videoId): ?array
     {
+        // Fixed https host, no redirects; only a validated id goes in the query.
+        if (preg_match('/^[A-Za-z0-9_-]{11}$/', $videoId) !== 1) {
+            return null;
+        }
         $url = self::OEMBED . '?' . http_build_query([
             'url' => 'https://www.youtube.com/watch?v=' . $videoId,
             'format' => 'json',
@@ -172,7 +177,7 @@ final class YouTubeClient
             }
             return $r;
         });
-        if ($res->status !== 200) {
+        if ($res->status !== 200 || strlen($res->body) > self::OEMBED_MAX_BYTES) {
             return null;
         }
         return $res->json();

@@ -74,6 +74,8 @@ final class RulingsTest extends TestCase
         $this->assertStringContainsString('src="https://www.youtube-nocookie.com/embed/' . self::VID . '"', $c);
         $this->assertStringContainsString('title="A &quot;quoted&quot; title"', $c);
         $this->assertSame('html', BlockGrammar::parse($c)[0]);
+        $this->assertArrayHasKey('iframe', \WpStub::$posts[$job->postId]->ksesTags, 'the iframe survives kses when the runner has no user');
+        $this->assertSame([], apply_filters('wp_kses_allowed_html', [], 'post'), 'only for that one insert');
         $this->assertFalse((bool) \IndianOpinion\YtToPost\Settings::DEFAULTS['privacy_embed']);
     }
 

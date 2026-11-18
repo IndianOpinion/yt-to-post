@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace IndianOpinion\YtToPost\YouTube;
 
 /**
- * The access token cache: a transient that expires 60 seconds early.
+ * The access token cache: an encrypted transient that expires 60 seconds
+ * early.
  */
 final class AccessTokens
 {
@@ -20,8 +21,8 @@ final class AccessTokens
         if (!Connection::isConnected()) {
             return null;
         }
-        $t = get_transient(self::TRANSIENT);
-        if (is_string($t) && $t !== '') {
+        $t = $this->oauth->cachedAccessToken();
+        if ($t !== null) {
             return $t;
         }
         return $this->oauth->refresh()['token'];

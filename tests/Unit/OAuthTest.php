@@ -103,7 +103,8 @@ final class OAuthTest extends TestCase
         $this->assertSame(Connection::CONNECTED, $c['state']);
         $this->assertStringNotContainsString('r2', $c['token'], 'refresh token stored encrypted');
         $this->assertSame('r2', $this->vault->decrypt($c['token']));
-        $this->assertSame('a2', get_transient(AccessTokens::TRANSIENT));
+        $this->assertSame('a2', $this->vault->decrypt((string) get_transient(AccessTokens::TRANSIENT)));
+        $this->assertStringStartsWith('v1:', (string) get_transient(AccessTokens::TRANSIENT), 'access token encrypted at rest');
         $this->assertSame($this->clock->now() + 3540, \WpStub::$transients[AccessTokens::TRANSIENT][1], 'expires 60 seconds early');
     }
 

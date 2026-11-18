@@ -8,7 +8,9 @@ use IndianOpinion\YtToPost\Support\Options;
 
 /**
  * One runner per site: an option holding the lock's expiry time. add_option
- * is an atomic insert, so two runners cannot both take a free lock.
+ * is an atomic insert, so two runners cannot both take a free lock, and an
+ * expired lock is taken over with a conditional UPDATE. The daily caps and
+ * the pipeline's quota reservations are only written under this lock.
  */
 final class SiteLock
 {
@@ -19,9 +21,27 @@ final class SiteLock
         if (add_option(self::OPTION, $now + $ttl, '', false)) {
             return true;
         }
-        $until = Options::freshInt(self::OPTION);
+        $raw = Options::fresh(self::OPTION, 0);
+        $until = is_numeric($raw) ? (int) $raw : 0;
         if ($until > $now) {
             return false;
+        }
+        // Take over an expired lock with a compare-and-swap, so two runners
+        // that both saw it expire cannot both win.
+        global $wpdb;
+        if (is_object($wpdb) && method_exists($wpdb, 'query') && method_exists($wpdb, 'prepare') && isset($wpdb->options)) {
+            $won = $wpdb->query($wpdb->prepare(
+                "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s",
+                (string) ($now + $ttl),
+                self::OPTION,
+                is_scalar($raw) ? (string) $raw : ''
+            ));
+            if (function_exists('wp_cache_delete')) {
+                wp_cache_delete(self::OPTION, 'options');
+            }
+            if ($won !== 1) {
+                return false;
+            }
         }
         update_option(self::OPTION, $now + $ttl, false);
         return true;

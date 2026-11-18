@@ -78,7 +78,30 @@ final class DraftWriter
         unset($args['post_date'], $args['post_date_gmt'], $args['edit_date'], $args['ID'], $args['import_id']);
         $args['post_name'] = '';
 
-        $postId = wp_insert_post(wp_slash($args), true);
+        // The privacy-enhanced player is an iframe, which the post kses rules
+        // strip when the runner has no user with unfiltered_html (WP-Cron,
+        // WP-CLI). The iframe is built here from a validated id, so it is
+        // allowed for this one insert only.
+        $allowIframe = static function ($tags, $context) {
+            if ($context === 'post' && is_array($tags)) {
+                $tags['iframe'] = [
+                    'src' => true, 'width' => true, 'height' => true, 'title' => true, 'loading' => true,
+                    'referrerpolicy' => true, 'allow' => true, 'allowfullscreen' => true,
+                ];
+            }
+            return $tags;
+        };
+        $privacy = Settings::bool('privacy_embed');
+        if ($privacy) {
+            add_filter('wp_kses_allowed_html', $allowIframe, 10, 2);
+        }
+        try {
+            $postId = wp_insert_post(wp_slash($args), true);
+        } finally {
+            if ($privacy) {
+                remove_filter('wp_kses_allowed_html', $allowIframe, 10);
+            }
+        }
         if (is_wp_error($postId)) {
             throw new YtToPostException('Could not create the draft: ' . $postId->get_error_message());
         }

@@ -13,6 +13,8 @@ final class VideoMeta
 {
     public const SOURCE_API = 'api';
     public const SOURCE_OEMBED = 'oembed';
+    /** oEmbed text is unverified input: keep it short. */
+    public const OEMBED_TEXT_MAX = 200;
 
     /**
      * @param list<string>|null $regionAllowed
@@ -89,9 +91,9 @@ final class VideoMeta
         $thumb = self::str($o['thumbnail_url'] ?? '');
         return new self(
             $id,
-            self::str($o['title'] ?? ''),
+            mb_substr(self::str($o['title'] ?? ''), 0, self::OEMBED_TEXT_MAX),
             '',
-            self::str($o['author_name'] ?? ''),
+            mb_substr(self::str($o['author_name'] ?? ''), 0, self::OEMBED_TEXT_MAX),
             '',
             '',
             '',

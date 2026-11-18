@@ -242,8 +242,21 @@ final class OAuthClient
         $expires = (int) ($tokens['expires_in'] ?? 3600);
         $ttl = $expires - 60;
         if ($ttl > 0) {
-            set_transient(AccessTokens::TRANSIENT, $token, $ttl);
+            // Encrypted at rest like the refresh token: transients can live in
+            // the options table or a shared object cache.
+            set_transient(AccessTokens::TRANSIENT, $this->vault->encrypt($token), $ttl);
         }
         return ['token' => $token, 'expires_in' => $expires];
+    }
+
+    /** The cached access token, or null when there is none or it cannot be decrypted. */
+    public function cachedAccessToken(): ?string
+    {
+        $t = get_transient(AccessTokens::TRANSIENT);
+        if (!is_string($t) || $t === '') {
+            return null;
+        }
+        $plain = $this->vault->decrypt($t);
+        return $plain !== null && $plain !== '' ? $plain : null;
     }
 }

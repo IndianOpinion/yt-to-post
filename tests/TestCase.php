@@ -78,7 +78,7 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
             'channel_title' => 'Own Channel',
             'connected_at' => $this->clock->now(),
         ]);
-        set_transient(AccessTokens::TRANSIENT, 'access-1', 3000);
+        set_transient(AccessTokens::TRANSIENT, $this->vault->encrypt('access-1'), 3000);
     }
 
     /**

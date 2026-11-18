@@ -98,6 +98,8 @@ class WP_Post
     public string $post_name = '';
     /** @var array<string,mixed> */
     public array $args = [];
+    /** @var array<string,mixed> */
+    public array $ksesTags = [];
 }
 
 class WP_REST_Request implements ArrayAccess
@@ -188,6 +190,17 @@ function add_filter(string $hook, callable $cb, int $priority = 10, int $args = 
 function add_action(string $hook, callable $cb, int $priority = 10, int $args = 1): bool
 {
     return add_filter($hook, $cb, $priority, $args);
+}
+
+function remove_filter(string $hook, callable $cb, int $priority = 10): bool
+{
+    foreach (WpStub::$filters[$hook][$priority] ?? [] as $i => $known) {
+        if ($known === $cb) {
+            unset(WpStub::$filters[$hook][$priority][$i]);
+            return true;
+        }
+    }
+    return false;
 }
 
 function remove_all_filters(string $hook): bool
@@ -444,6 +457,8 @@ function wp_insert_post(array $args, bool $wpError = false): int|WP_Error
     $p->post_date = (string) ($args['post_date'] ?? '');
     $p->post_name = (string) ($args['post_name'] ?? '');
     $p->args = $args;
+    // What the post kses rules would allow at insert time.
+    $p->ksesTags = (array) apply_filters('wp_kses_allowed_html', [], 'post');
     WpStub::$posts[$p->ID] = $p;
     return $p->ID;
 }
