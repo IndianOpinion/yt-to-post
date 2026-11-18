@@ -171,8 +171,12 @@ final class AdminController
         }
         $input = is_array($post['settings'] ?? null) ? wp_unslash($post['settings']) : [];
         $input = is_array($input) ? $input : [];
+        // The kill switch has its own form (toggle); this form never changes it.
+        unset($input['enabled']);
         foreach (Settings::BOOLEANS as $b) {
-            $input[$b] = !empty($input[$b]);
+            if ($b !== 'enabled') {
+                $input[$b] = !empty($input[$b]);
+            }
         }
         foreach (array_keys(Settings::CONSTANTS) as $k) {
             if (Settings::constantName($k) !== null) {
@@ -180,10 +184,9 @@ final class AdminController
             }
         }
         $old = get_option(Settings::OPTION, []);
-        [$values, $errors] = Settings::validate($input, is_array($old) ? $old : []);
-        if (KillSwitch::lockedByConstant()) {
-            $values['enabled'] = is_array($old) ? (bool) ($old['enabled'] ?? true) : true;
-        }
+        $old = is_array($old) ? $old : [];
+        [$values, $errors] = Settings::validate($input, $old);
+        $values['enabled'] = (bool) ($old['enabled'] ?? Settings::DEFAULTS['enabled']);
         Settings::save($values);
         foreach ($errors as $e) {
             Flash::add($e . ' The old value was kept.', 'error');

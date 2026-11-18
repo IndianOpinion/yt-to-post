@@ -9,6 +9,7 @@ use IndianOpinion\YtToPost\Admin\Flash;
 use IndianOpinion\YtToPost\Admin\SettingsPage;
 use IndianOpinion\YtToPost\Admin\ToolsPage;
 use IndianOpinion\YtToPost\Jobs\JobState;
+use IndianOpinion\YtToPost\Limits\KillSwitch;
 use IndianOpinion\YtToPost\Plugin;
 use IndianOpinion\YtToPost\Rest\RestController;
 use IndianOpinion\YtToPost\Settings;
@@ -133,6 +134,20 @@ final class AdminTest extends TestCase
         $this->assertSame(30, $saved['max_chunks'] ?? 30, 'out of range refused, old value kept');
         $this->assertSame(45, $saved['retention_days']);
         $this->assertSame(3, Settings::int('max_videos_per_day'));
+        $this->assertTrue(KillSwitch::isEnabled(), 'saving the settings form never switches the plugin off');
+    }
+
+    public function testSettingsFormNeverChangesTheKillSwitch(): void
+    {
+        \WpStub::$userId = 1;
+        $this->post('yt_to_post_settings', ['settings' => ['retention_days' => '20']]);
+        $this->assertTrue(KillSwitch::isEnabled());
+        $this->post('yt_to_post_settings', ['settings' => ['enabled' => '0', 'retention_days' => '21']]);
+        $this->assertTrue(KillSwitch::isEnabled(), 'the switch has its own form');
+        KillSwitch::set(false);
+        $this->post('yt_to_post_settings', ['settings' => ['enabled' => '1', 'retention_days' => '22']]);
+        $this->assertFalse(KillSwitch::isEnabled());
+        $this->assertSame(22, Settings::int('retention_days'));
     }
 
     public function testT89NonceAndCapabilityOnEveryFormActionAndRoute(): void
