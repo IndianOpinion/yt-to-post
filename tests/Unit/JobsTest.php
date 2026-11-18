@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace IndianOpinion\YtToPost\Tests\Unit;
 
 use IndianOpinion\YtToPost\Integrations\GenQueue;
-use IndianOpinion\YtToPost\Integrations\Hooks;
 use IndianOpinion\YtToPost\Jobs\JobService;
 use IndianOpinion\YtToPost\Jobs\JobState;
 use IndianOpinion\YtToPost\Jobs\Runner;
@@ -87,9 +86,10 @@ final class JobsTest extends TestCase
         define('GEN_QUEUE_VERSION', '0.1.0');
         $this->connect();
         $seen = [];
-        add_filter(Hooks::name('gen_queue_enqueue'), static function ($accepted, string $type, array $payload, array $opts) use (&$seen) {
+        $answer = 41;
+        add_filter('gen_queue_enqueue_job', static function ($accepted, string $type, array $payload, array $opts) use (&$seen, &$answer) {
             $seen[] = [$type, $payload, $opts];
-            return 'gq-1';
+            return $answer;
         }, 10, 4);
         $jobs = new JobService($this->services);
         $first = $jobs->create(self::VID, [], 1, true);
@@ -98,18 +98,43 @@ final class JobsTest extends TestCase
         $this->assertSame('yt-to-post:' . self::VID . ':0', $seen[0][2]['idempotency_key']);
         $this->assertFalse(wp_next_scheduled('yt_to_post_run'), 'gen-queue took it: no own cron event');
         $jobs->cancel($first->jobId());
+        $jobs->retry($first->jobId());
+        $this->assertSame('yt-to-post:' . self::VID . ':0:r1', $seen[1][2]['idempotency_key'], 'a resume gets a new key: gen-queue never requeues a finished job');
+        $jobs->cancel($first->jobId());
+        $answer = new \WP_Error('gen_queue_failed', 'storage');
         $jobs->create(self::VID, ['force' => true], 1, true);
-        $this->assertSame('yt-to-post:' . self::VID . ':1', $seen[1][2]['idempotency_key']);
+        $this->assertSame('yt-to-post:' . self::VID . ':1', $seen[2][2]['idempotency_key']);
+        $this->assertNotFalse(wp_next_scheduled('yt_to_post_run'), 'a WP_Error falls back to the own runner');
 
-        $handler = null;
-        add_filter(Hooks::name('gen_queue_register'), static fn ($t) => $t);
-        GenQueue::register(static function (int $id, float $s) use (&$handler): array {
-            $handler = [$id, $s];
-            return [];
+        $registered = [];
+        require_once dirname(__DIR__) . '/Support/gen-queue-functions.php';
+        GenQueue::register(static function (int $id, float $s) use (&$registered): array {
+            $registered = [$id, $s];
+            return ['summary' => ['done' => 1], 'cost' => 0.0123];
         });
-        $types = apply_filters(Hooks::name('gen_queue_register'), []);
-        $types[GenQueue::JOB_TYPE]['handler'](['job_id' => 9], ['seconds' => 12]);
-        $this->assertSame([9, 12.0], $handler);
+        do_action('gen_queue_register_types');
+        $handler = $GLOBALS['gq_types'][GenQueue::JOB_TYPE];
+        $job = new class {
+            /** @var array<string,mixed> */
+            public array $payload = ['job_id' => 9];
+        };
+        $ctx = new class {
+            /** @var list<array{0:string,1:array<string,mixed>}> */
+            public array $costs = [];
+            public function deadline(): int
+            {
+                return time() + 30;
+            }
+            /** @param array<string,mixed> $usage */
+            public function addCost(string $amount, array $usage = []): void
+            {
+                $this->costs[] = [$amount, $usage];
+            }
+        };
+        $this->assertSame(['done' => 1], $handler($job, $ctx));
+        $this->assertSame(9, $registered[0]);
+        $this->assertGreaterThanOrEqual(20.0, $registered[1]);
+        $this->assertSame([['0.012300000', ['metered' => false]]], $ctx->costs);
     }
 
     #[RunInSeparateProcess]
@@ -118,32 +143,61 @@ final class JobsTest extends TestCase
     {
         define('SPEND_METER_API', 1);
         $this->ready();
-        add_filter(Hooks::name('spend_pre_spend'), static fn ($v, array $ctx) => ['allowed' => 'yes', 'reason' => 'odd'], 10, 2);
+        $released = [];
+        add_action('spend_meter_release', static function (string $id) use (&$released): void {
+            $released[] = $id;
+        });
+        add_filter('spend_meter_pre_spend', static fn ($v, array $intent) => ['allowed' => 'yes', 'reason' => 'odd', 'reservation_id' => 'r0'], 10, 2);
         $job = $this->createJob();
         $this->runAll();
         $held = $this->job($job->id);
         $this->assertSame(JobState::HELD_CAP, $held->state);
         $this->assertStringContainsString('spend-meter', $held->lastError);
         $this->assertSame([], $this->caller->requests);
+        $this->assertSame(['r0'], $released, 'a reservation on a deny is given back');
 
-        remove_all_filters(Hooks::name('spend_pre_spend'));
-        $ctxs = [];
-        add_filter(Hooks::name('spend_pre_spend'), static function ($v, array $ctx) use (&$ctxs) {
-            $ctxs[] = $ctx;
-            return ['allowed' => true, 'reservation' => 'r1'];
+        remove_all_filters('spend_meter_pre_spend');
+        $intents = [];
+        add_filter('spend_meter_pre_spend', static function ($v, array $intent) use (&$intents) {
+            $intents[] = $intent;
+            return ['allowed' => true, 'reason' => 'ok', 'message' => '', 'reservation_id' => 'r1', 'estimate' => 10, 'remaining' => null, 'api' => 1];
         }, 10, 2);
         $recorded = [];
-        add_action(Hooks::name('spend_record'), static function ($res, array $usage) use (&$recorded): void {
-            $recorded[] = [$res, $usage];
-        }, 10, 2);
+        add_action('spend_meter_record', static function (array $call) use (&$recorded): void {
+            $recorded[] = $call;
+        });
         $this->clock->advance(3601);
         $this->assertSame(JobState::DONE, $this->runAll()->state);
-        $this->assertSame('yt_to_post', $ctxs[0]['purpose']);
-        $this->assertSame('yt-to-post', $ctxs[0]['caller']);
-        $this->assertSame('test/model', $ctxs[0]['model']);
-        $this->assertGreaterThan(0, $ctxs[0]['estimated_input_tokens']);
-        $this->assertSame('r1', $recorded[0][0]);
-        $this->assertSame(100, $recorded[0][1]['input_tokens']);
+        $this->assertSame('yt_to_post', $intents[0]['purpose']);
+        $this->assertSame('yt-to-post', $intents[0]['caller']);
+        $this->assertSame('test/model', $intents[0]['model']);
+        $this->assertGreaterThan(0, $intents[0]['est_input_tokens']);
+        $this->assertSame('r1', $recorded[0]['reservation_id']);
+        $this->assertSame('ok', $recorded[0]['status']);
+        $this->assertSame(100, $recorded[0]['input_tokens']);
+        $this->assertSame(['r0'], $released);
+    }
+
+    #[RunInSeparateProcess]
+    #[PreserveGlobalState(false)]
+    public function testT56SpendMeterNullMeansAbsentAndFailedCallsAreRecorded(): void
+    {
+        define('SPEND_METER_API', 1);
+        $this->ready();
+        $recorded = [];
+        add_action('spend_meter_record', static function (array $call) use (&$recorded): void {
+            $recorded[] = $call;
+        });
+        $job = $this->createJob();
+        $this->caller->on('yt-to-post.single', static function (): array {
+            throw new \IndianOpinion\YtToPost\Exception\ModelOutputException('broken body');
+        });
+        for ($i = 0; $i < 6 && $this->caller->requests === []; $i++) {
+            $this->runner()->pipeline()->advance($this->job($job->id));
+        }
+        $this->assertCount(1, $this->caller->requests, 'no listener (null) means no meter: own caps decide');
+        $this->assertSame('error_billed', $recorded[0]['status']);
+        $this->assertArrayNotHasKey('reservation_id', $recorded[0]);
     }
 
     public function testT83CancelStopsBeforeNextCallAndIsNoOpOnDone(): void

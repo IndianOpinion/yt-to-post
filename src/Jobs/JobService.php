@@ -34,17 +34,18 @@ final class JobService
         'force', 'allow_unlisted', 'override_limits', 'rights_confirmed',
     ];
 
-    /** @var \Closure(int,string,int):void */
+    /** @var \Closure(int,string,int,int):void */
     private \Closure $scheduler;
 
     /**
-     * @param (callable(int,string,int):void)|null $scheduler called with job id, video id, force counter
+     * @param (callable(int,string,int,int):void)|null $scheduler called with job id, video id, force counter
+     *        and resume counter (0 for a new job, then one more for each retry, transcript or rights resume)
      */
     public function __construct(private readonly Services $s, ?callable $scheduler = null)
     {
         $this->scheduler = $scheduler === null
-            ? static function (int $id, string $video, int $force): void {
-                if (!GenQueue::enqueue($id, $video, $force)) {
+            ? static function (int $id, string $video, int $force, int $resume = 0): void {
+                if (!GenQueue::enqueue($id, $video, $force, $resume)) {
                     Scheduler::kick();
                 }
             }
@@ -137,7 +138,7 @@ final class JobService
         if (function_exists('do_action')) {
             do_action('yt_to_post_job_created', $job);
         }
-        ($this->scheduler)($job->id, $id, $seq);
+        ($this->scheduler)($job->id, $id, $seq, 0);
         return new CreateOutcome($job, false, 'Job created.');
     }
 
@@ -188,6 +189,7 @@ final class JobService
             throw new InvalidTranscriptException(sprintf('The transcript is larger than the limit of %d bytes.', Settings::int('max_transcript_bytes')));
         }
         $jobArgs = $job->args;
+        $jobArgs['resume_seq'] = (int) $job->arg('resume_seq', 0) + 1;
         if (isset($args['transcript_language']) && is_string($args['transcript_language'])) {
             $lang = $args['transcript_language'];
             if ($lang !== '' && $lang !== 'same' && !Language::isValid($lang)) {
@@ -220,7 +222,7 @@ final class JobService
             'updatedAt' => $this->s->clock->now(),
         ])->withLog('transcript supplied', $this->s->clock->now());
         JobEvents::save($this->s->jobs, $job, $from);
-        ($this->scheduler)($job->id, $job->videoId, (int) $job->arg('force_seq', 0));
+        ($this->scheduler)($job->id, $job->videoId, (int) $job->arg('force_seq', 0), (int) $job->arg('resume_seq', 0));
         return true;
     }
 
@@ -234,12 +236,13 @@ final class JobService
         $args = $job->args;
         $args['rights_confirmed'] = true;
         $args['rights_user'] = $userId;
+        $args['resume_seq'] = (int) $job->arg('resume_seq', 0) + 1;
         $from = $job->state;
         $next = JobState::isActive($job->step) ? $job->step : JobState::METADATA;
         $job = $job->with(['args' => $args, 'state' => $next, 'lastError' => '', 'updatedAt' => $this->s->clock->now()])
             ->withLog('rights confirmed by user ' . $userId, $this->s->clock->now());
         JobEvents::save($this->s->jobs, $job, $from);
-        ($this->scheduler)($job->id, $job->videoId, (int) $job->arg('force_seq', 0));
+        ($this->scheduler)($job->id, $job->videoId, (int) $job->arg('force_seq', 0), (int) $job->arg('resume_seq', 0));
         return true;
     }
 
@@ -274,7 +277,10 @@ final class JobService
         if ($job->metadata === null) {
             $step = JobState::METADATA;
         }
+        $args = $job->args;
+        $args['resume_seq'] = (int) $job->arg('resume_seq', 0) + 1;
         $job = $job->with([
+            'args' => $args,
             'state' => $step,
             'step' => $step,
             'attempts' => 0,
@@ -284,7 +290,7 @@ final class JobService
             'updatedAt' => $this->s->clock->now(),
         ])->withLog('retry requested', $this->s->clock->now());
         JobEvents::save($this->s->jobs, $job, $from);
-        ($this->scheduler)($job->id, $job->videoId, (int) $job->arg('force_seq', 0));
+        ($this->scheduler)($job->id, $job->videoId, (int) $job->arg('force_seq', 0), (int) $job->arg('resume_seq', 0));
         return true;
     }
 
@@ -346,7 +352,7 @@ final class JobService
             return false;
         }
         $post = get_post($postId);
-        return $post !== null && $post->post_status !== 'trash';
+        return $post instanceof \WP_Post && $post->post_status !== 'trash';
     }
 
     private function existingPost(string $videoId): int

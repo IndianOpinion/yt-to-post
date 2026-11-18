@@ -76,7 +76,7 @@ final class Plugin
                 self::jobs()->resumeAuthWaiting();
             }
         });
-        GenQueue::register(static fn (int $jobId, float $seconds) => self::runner()->run(['job' => $jobId, 'time' => $seconds])->toArray());
+        GenQueue::register([self::class, 'genQueueRun']);
 
         if (is_admin()) {
             add_action('admin_menu', [self::class, 'menus']);
@@ -155,6 +155,29 @@ final class Plugin
         }
         wp_safe_redirect($result->redirect);
         exit;
+    }
+
+    /**
+     * gen-queue's handler for one job: one runner pass on that job within
+     * the queue's time, then the plugin's own runner takes any work left
+     * (more chunks, a hold that ends later). Returns the run summary and the
+     * model cost spent in this pass.
+     *
+     * @return array{summary:array<string,mixed>,cost:float}
+     */
+    public static function genQueueRun(int $jobId, float $seconds): array
+    {
+        $jobs = self::services()->jobs;
+        $before = $jobs->find($jobId);
+        $runner = self::runner();
+        $summary = $runner->run(['job' => $jobId, 'time' => $seconds])->toArray();
+        $after = $jobs->find($jobId);
+        $cost = 0.0;
+        if ($before !== null && $after !== null) {
+            $cost = max(0.0, (float) $after->arg('cost', 0) - (float) $before->arg('cost', 0));
+        }
+        $runner->reschedule();
+        return ['summary' => $summary + ['job_id' => $jobId, 'state' => $after !== null ? $after->state : ''], 'cost' => $cost];
     }
 
     public static function cronRun(): void

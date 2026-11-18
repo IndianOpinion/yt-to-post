@@ -24,6 +24,7 @@ use IndianOpinion\YtToPost\Exception\DisabledException;
 use IndianOpinion\YtToPost\Exception\HoldException;
 use IndianOpinion\YtToPost\Exception\InvalidTranscriptException;
 use IndianOpinion\YtToPost\Exception\InvalidVideoException;
+use IndianOpinion\YtToPost\Exception\ModelOutputException;
 use IndianOpinion\YtToPost\Exception\NeedsTranscriptException;
 use IndianOpinion\YtToPost\Exception\QuotaException;
 use IndianOpinion\YtToPost\Exception\WrongLanguageException;
@@ -593,22 +594,34 @@ final class Pipeline
         if (!$spend['allowed']) {
             throw new HoldException('Held by spend-meter: ' . $spend['reason'], $this->now() + 3600);
         }
-        $args = $job->args;
-        if (!(bool) ($args['video_counted'] ?? false)) {
-            $caps->countVideo();
-            $args['video_counted'] = true;
+        try {
+            $args = $job->args;
+            if (!(bool) ($args['video_counted'] ?? false)) {
+                $caps->countVideo();
+                $args['video_counted'] = true;
+            }
+            $caps->countCalls(1);
+            $job = $job->with(['args' => $args, 'modelCalls' => $job->modelCalls + 1]);
+            $this->s->jobs->save($job);
+        } catch (\Throwable $e) {
+            // The call will not happen: give the reservation back.
+            SpendMeter::release($spend);
+            throw $e;
         }
-        $caps->countCalls(1);
-        $job = $job->with(['args' => $args, 'modelCalls' => $job->modelCalls + 1]);
-        $this->s->jobs->save($job);
         $remaining = $deadline === null ? null : max(5.0, $deadline - $this->s->clock->micro());
         try {
             $res = $caller->call(new ModelRequest($purpose, $schemaName, $schema, $system, $input, $remaining));
         } catch (\Throwable $e) {
-            SpendMeter::release($spend['reservation']);
+            // The call was attempted: spend-meter wants every attempt recorded.
+            [$status, $http] = match (true) {
+                $e instanceof ModelOutputException => ['error_billed', 200],
+                $e instanceof AccountHoldException => ['error_unbilled', 402],
+                default => ['error_unbilled', 0],
+            };
+            SpendMeter::record($spend, null, $status, $http, (new \ReflectionClass($e))->getShortName());
             throw $e;
         }
-        SpendMeter::record($spend['reservation'], $res);
+        SpendMeter::record($spend, $res);
         $extra = max(0, $res->attempts - 1);
         if ($extra > 0) {
             $caps->countCalls($extra);

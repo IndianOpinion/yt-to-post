@@ -176,7 +176,8 @@ final class Runner
         return $updated;
     }
 
-    private function reschedule(): void
+    /** Schedules the plugin's own runner while work remains or a hold ends later. */
+    public function reschedule(): void
     {
         if (defined('YT_TO_POST_DISABLE_CRON_RUNNER') && constant('YT_TO_POST_DISABLE_CRON_RUNNER')) {
             return;
