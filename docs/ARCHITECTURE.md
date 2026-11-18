@@ -17,7 +17,7 @@ PRD's open questions.
 | `Draft` | `BlockBuilder`, `CreditBuilder`, `DraftWriter`. |
 | `Limits` | `KillSwitch`, `DailyCaps` (site day), `QuotaMeter` (Pacific day). |
 | `Jobs` | `Job`, `JobState`, repositories (`WpdbJobRepository`, `MemoryJobRepository`), `SchemaInstaller`, `Pipeline` (one unit of work), `Runner` (ticks and locks), `JobService` (create, supply, confirm, cancel, retry, estimate), `Housekeeping` (retention), `Scheduler`, `SiteLock`. |
-| `Integrations` | `GenQueue`, `SpendMeter`, `Hooks` (their hook names, filterable). |
+| `Integrations` | `GenQueue`, `SpendMeter`: the companions' published hooks, used only when present. |
 | `Admin`, `Rest`, `Cli` | Screens and handlers, REST routes, WP-CLI commands. |
 | `Plugin`, `Uninstaller`, `functions.php` | Wiring, uninstall, global wrappers. |
 
@@ -59,7 +59,7 @@ keeps the step it resumes at in `step`.
 
 ## Decisions taken by the builder
 
-1. **Model calls through a `ModelCaller` interface.** `LlmJsonCaller` wraps llm-json-php (`indianopinion/llm-json-php`, Composer `vcs` dependency, bundled in the release zip, never committed). The `yt_to_post_model_caller` filter accepts a `ModelCaller` or a callable, so a site can run without the dependency. Credit exhaustion is mapped to `AccountHoldException`, so the pipeline never depends on library classes.
+1. **Model calls through a `ModelCaller` interface.** `LlmJsonCaller` wraps llm-json-php (`indianopinion/llm-json-php`, a Composer `vcs` dependency, never bundled and never committed, by the ruling of 14 November). The `yt_to_post_model_caller` filter accepts a `ModelCaller` or a callable, so a site can run without the dependency. Credit exhaustion is mapped to `AccountHoldException`, so the pipeline never depends on library classes.
 2. **`source_language` in the article schema.** The base article schema adds a required `source_language` (the language the model hears). It records the transcript language when nothing else gives it (case 41), and keeps strict mode possible because every field stays required.
 3. **Retries (case 77).** "Up to three attempts with 2, 4, 8 seconds" is read as three retries after the first request, so all three bases are used, with up to 25 per cent jitter and `Retry-After` honoured up to 60 seconds. Each attempt reserves its quota units, since YouTube charges failed requests too.
 4. **Overlapping cues (case 40).** Rolling automatic captions overlap legitimately, so "overlapping" is counted as a cue that starts before the previous cue's start (going backwards). End before start and unparsable times also count.
@@ -76,10 +76,14 @@ keeps the step it resumes at in `step`.
 15. **Cancellation races.** The pipeline re-reads the job before each external call and before saving; a cancel made while a step runs wins.
 16. **Locks.** The site lock is an option written with `add_option` (an atomic insert) holding its expiry; an expired lock is taken over. The per-video lock is a 15-minute transient refreshed each step.
 17. **REST nonce.** Every route checks `X-WP-Nonce` in its permission callback, except requests authenticated by an application password, which carry none.
-18. **Soft integration hook names.** gen-queue: `gen_queue_soft_enqueue` (accepted when it returns anything other than null, false or a `WP_Error`) and `gen_queue_register_job_type`; spend-meter: `spend_meter_pre_spend`, `spend_meter_record`, `spend_meter_release`. They are written from the PRD's description and can be renamed with `yt_to_post_integration_hooks` if those projects publish different names.
+18. **Soft integrations, matched to the released contracts (gen-queue 0.1.0, spend-meter 0.1.0, contract 1).** spend-meter: `apply_filters('spend_meter_pre_spend', null, $intent)` with `purpose`, `caller`, `provider` (lower case), `model` and `est_input_tokens`; `null` means no meter, so the plugin's own guards decide; a non-null answer allows the call only when `allowed` is exactly `true`, and any reservation on a deny is released. After the call, `do_action('spend_meter_record', $call)` with one array (`reservation_id` when there is one, `status` `ok`, `error_billed` for a broken body, `error_unbilled` otherwise, tokens, `provider_cost` in nanos, `fallback_from` when the chain fell back). A reservation for a call that did not happen goes back with `do_action('spend_meter_release', $reservation_id)`. gen-queue: the type `yt_to_post.article` is registered with `gen_queue_register_type()` on `gen_queue_register_types`; jobs go through `apply_filters('gen_queue_enqueue_job', null, $type, $payload, $args)`, accepted only when it returns a job id (null means absent, a `WP_Error` means failed; both fall back to the own runner). The idempotency key is the video id plus the force counter, plus a resume counter after a resume, because gen-queue never requeues a succeeded job under the same key. The handler runs one runner pass on its job within the queue's deadline, reports the model cost with `addCost()` (marked `metered` when spend-meter recorded it already), and kicks the own runner for any steps left.
 19. **Time.** Caps use the site timezone day, quota the `America/Los_Angeles` day, so DST is handled by the timezone database.
 20. **Storage.** The normalised transcript is stored gzip-compressed and base64-encoded when zlib is present, JSON otherwise. Raw caption or supplied text sits in `source` only until normalising.
-21. **Static analysis** runs at PHPStan level 6 with WordPress stubs, as the brief allows for plugins.
+21. **Static analysis** runs at PHPStan level 8 with WordPress stubs. The only ignored rule is the stubs' `literal-string` type on `wpdb::prepare()`, because the table name comes from `$wpdb->prefix`; every value still goes through a placeholder.
+22. **Tokens at rest.** The refresh token and the cached access token are both encrypted with secretbox under the salt-derived key. The client secret, API key and model key are stored in plain text in the settings option when not set by constants (the screen recommends the constants and never prints them back); nothing secret is logged.
+23. **Settings form and the switch.** The settings form never changes the kill switch; only the switch form, WP-CLI and the constant do.
+24. **HTTP bounds.** Every outbound request refuses unsafe (private or local) addresses, follows no redirects, verifies TLS and caps the response body at the transcript limit plus 64 KiB. The oEmbed call goes only to the fixed `www.youtube.com/oembed` URL with a validated id, ignores answers over 64 KiB and keeps at most 200 characters of title and channel.
+25. **Privacy-enhanced player and kses.** The iframe is allowed through the post kses rules for the one `wp_insert_post` call that creates the draft, because the runner (WP-Cron, WP-CLI) usually has no user with `unfiltered_html`.
 
 ## Lessons from production, where they live
 

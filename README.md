@@ -32,7 +32,7 @@ composer config repositories.yt-to-post vcs https://github.com/IndianOpinion/yt-
 composer require indianopinion/yt-to-post
 ```
 
-Without Composer: download the release zip (it bundles `llm-json-php` under `lib/`), unzip it into `wp-content/plugins/yt-to-post/` and activate it. A plain checkout works too: run `composer install --no-dev` inside it, or put llm-json-php at `lib/llm-json-php/`. `autoload.php` loads either.
+Without a Composer-managed site: put the plugin in `wp-content/plugins/yt-to-post/`, run `composer install --no-dev` inside that folder, and activate it. `autoload.php` loads `vendor/` when it is there. `llm-json-php` is a Composer `vcs` dependency and is never bundled with this plugin. If you cannot run Composer, the plugin still loads: plug in your own model caller with the `yt_to_post_model_caller` filter (see `examples/custom-model-caller.php`), or load `llm-json-php` yourself before this plugin.
 
 As a must-use plugin: copy the folder to `wp-content/mu-plugins/yt-to-post/` and `examples/mu-plugin-loader.php` to `wp-content/mu-plugins/yt-to-post-loader.php`. Must-use plugins never run activation hooks, so the jobs table is created on the first admin page load.
 
@@ -113,13 +113,17 @@ Other constants: `YT_TO_POST_DISABLE_CRON_RUNNER` (WP-Cron does housekeeping onl
 
 Before every paid call the kill switch, the daily caps, the `yt_to_post_can_run` filter and (when present) spend-meter are read fresh. A held job resumes on its own when the reason clears.
 
+**spend-meter** (when `SPEND_METER_API` is 1): before each model call the plugin applies `spend_meter_pre_spend` with an intent (`purpose` `yt_to_post`, `caller` `yt-to-post`, `provider`, `model`, `est_input_tokens`). A `null` answer means no meter is listening and the plugin's own caps decide; otherwise the call goes ahead only when `allowed` is exactly `true`. Every attempted call is then reported once with `spend_meter_record` (status `ok`, `error_billed` or `error_unbilled`, tokens, and the provider's cost in nanos when reported), and a reservation for a call that did not happen is given back with `spend_meter_release`.
+
+**gen-queue** (when `GEN_QUEUE_VERSION` is defined): the plugin registers the job type `yt_to_post.article` on `gen_queue_register_types` and enqueues each job through the `gen_queue_enqueue_job` filter, with the video id and force counter as the idempotency key (plus a resume counter after a retry, a supplied transcript or a rights confirmation). If the filter returns no job id, the plugin's own WP-Cron runner takes the job. Each gen-queue run works on its job for the queue's time, reports the model cost to the job context (as already metered when spend-meter is present), and leaves any remaining steps to the plugin's own runner.
+
 ## Hooks, REST and WP-CLI
 
 Functions: `yt_to_post_create()`, `yt_to_post_get_job()`, `yt_to_post_find_by_video()`, `yt_to_post_supply_transcript()`, `yt_to_post_confirm_rights()`, `yt_to_post_cancel()`, `yt_to_post_retry()`, `yt_to_post_run()`, `yt_to_post_parse_video_id()`, `yt_to_post_is_enabled()`. `YT_TO_POST_VERSION` and the `yt_to_post_loaded` action tell you it is there.
 
 Actions: `yt_to_post_job_created`, `yt_to_post_job_state`, `yt_to_post_needs_transcript`, `yt_to_post_draft_created`, `yt_to_post_job_failed`, `yt_to_post_connection_changed`.
 
-Filters: `yt_to_post_select_track`, `yt_to_post_estimate_tokens`, `yt_to_post_bytes_per_token` (per-model ratio), `yt_to_post_chunk_tokens`, `yt_to_post_system_prompt`, `yt_to_post_article_schema`, `yt_to_post_article`, `yt_to_post_content`, `yt_to_post_credit_html`, `yt_to_post_post_args`, `yt_to_post_daily_caps` (lower only), `yt_to_post_can_run`, `yt_to_post_capability_create`, `yt_to_post_capability_settings`, `yt_to_post_retention_days`, `yt_to_post_model_caller` (plug in your own model, see `examples/custom-model-caller.php`), `yt_to_post_model_routes`, `yt_to_post_integration_hooks`.
+Filters: `yt_to_post_select_track`, `yt_to_post_estimate_tokens`, `yt_to_post_bytes_per_token` (per-model ratio), `yt_to_post_chunk_tokens`, `yt_to_post_system_prompt`, `yt_to_post_article_schema`, `yt_to_post_article`, `yt_to_post_content`, `yt_to_post_credit_html`, `yt_to_post_post_args`, `yt_to_post_daily_caps` (lower only), `yt_to_post_can_run`, `yt_to_post_capability_create`, `yt_to_post_capability_settings`, `yt_to_post_retention_days`, `yt_to_post_model_caller` (plug in your own model, see `examples/custom-model-caller.php`), `yt_to_post_model_routes`.
 
 REST (`yt-to-post/v1`, logged in, create capability, REST nonce): `POST /jobs`, `GET /jobs/<id>`, `POST /jobs/<id>/transcript`, `POST /jobs/<id>/retry`, `POST /jobs/<id>/cancel`, `POST /estimate`.
 
@@ -139,9 +143,8 @@ Transcripts can hold personal data about the people speaking. They go to your co
 - No audio transcription and no video download.
 - No machine translation through YouTube; the model translates when the article language differs.
 - The token estimate is bytes divided by three (adjustable per model); it is an estimate.
-- Counters and locks use options, which are not atomic; the site lock keeps one runner at a time.
+- Counters and locks use options. The site lock (an atomic insert, and a compare-and-swap to take over an expired lock) keeps one runner at a time, so the daily caps cannot race. Quota units spent outside the runner (estimates, playlist reads, connecting) are counted without that lock and can be off by a few units.
 - The privacy-enhanced player is an HTML block; users without `unfiltered_html` who edit the draft may see it stripped.
-- The gen-queue and spend-meter hook names follow those projects' published interfaces and can be renamed with `yt_to_post_integration_hooks`.
 
 ## FAQ
 

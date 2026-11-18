@@ -819,8 +819,8 @@ refused with a message and the old value kept.
 - Object caches: the switch and caps are read bypassing the object cache
   (case 69). Page caches are irrelevant; nothing is served to readers.
 - Runtime dependency: `indianopinion/llm-json-php` only (a `vcs`
-  repository in `composer.json`). The release zip bundles it so WordPress
-  sites need no Composer.
+  repository in `composer.json`). It is never bundled (ruling of
+  14 November); a site without Composer plugs in its own model caller.
 
 ## 11. Observability
 

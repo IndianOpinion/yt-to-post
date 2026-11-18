@@ -1,5 +1,4 @@
 /vendor/
-/lib/
 /.phpunit.cache/
 /.phpunit.result.cache
 /build/

@@ -25,7 +25,7 @@ You need your own Google Cloud project with the YouTube Data API v3, and a model
 
 == Installation ==
 
-1. Upload the plugin and activate it.
+1. Upload the plugin, run `composer install --no-dev` in its folder for the llm-json-php model client (it is not bundled), and activate it.
 2. Settings > YouTube to draft: add the OAuth client, the model and key, then connect your channel account.
 3. Tools > Video to draft: paste a link.
 

@@ -23,7 +23,7 @@ All notable changes to this project are documented here. The format follows
 - Opt-in privacy-enhanced player, opt-in playlist expansion (one job per video under the daily cap).
 - Retention: job working data, YouTube API data (purge or refresh, 30 days by default), and an operator setting for the transcript kept on drafts.
 - Tools screen, settings screen, draft notes meta box, REST routes under `yt-to-post/v1`, and `wp yt-to-post` commands.
-- Soft integrations with gen-queue and spend-meter; a filter to plug in any model caller.
+- Soft integrations with gen-queue and spend-meter through their published 0.1.0 interfaces; a filter to plug in any model caller.
 
 [Unreleased]: https://github.com/IndianOpinion/yt-to-post/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/IndianOpinion/yt-to-post/releases/tag/v0.1.0
