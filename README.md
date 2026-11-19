@@ -158,6 +158,10 @@ Transcripts can hold personal data about the people speaking. They go to your co
 
 **How do I stop everything now?** `wp yt-to-post disable`, the switch on the settings screen, or `define('YT_TO_POST_DISABLED', true);`.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Licence
 
 MIT. Copyright (c) 2026 Indian Opinion. See [LICENSE](LICENSE).
